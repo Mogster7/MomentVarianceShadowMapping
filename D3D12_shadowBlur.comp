@@ -1,0 +1,70 @@
+/*
+* Copyright (c) 2018-2020 The Forge Interactive Inc.
+*
+* This file is part of The-Forge
+* (see https://github.com/ConfettiFX/The-Forge).
+*
+* Licensed to the Apache Software Foundation (ASF) under one
+* or more contributor license agreements.  See the NOTICE file
+* distributed with this work for additional information
+* regarding copyright ownership.  The ASF licenses this file
+* to you under the Apache License, Version 2.0 (the
+* "License"); you may not use this file except in compliance
+* with the License.  You may obtain a copy of the License at
+*
+*   http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing,
+* software distributed under the License is distributed on an
+* "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+* KIND, either express or implied.  See the License for the
+* specific language governing permissions and limitations
+* under the License.
+*/
+struct Constants
+{
+    uint2 shadowMapSize;
+    bool horizontalPass;
+};
+
+ConstantBuffer<Constants> RootConstant : register(b0);
+Texture2D<float4> srcTexture: register(t1);
+RWTexture2D<float4> dstTexture: register(u2, UPDATE_FREQ_PER_DRAW);
+SamplerState miplessSampler : register(s3);
+
+static const float2 gaussFilter[5] = 
+{ 
+	{-2.0,	0.06136},
+	{-1.0,	0.24477},
+	{0.0,	0.38774},
+	{1.0,	0.24477},
+	{2.0,	0.06136}
+};
+
+
+[numthreads(16,16,1)]
+void main(uint3 DTid : SV_DispatchThreadID)
+{
+    float2 threadPos = float2(DTid.xy);
+
+    float2 smSize = float2(RootConstant.shadowMapSize.x, RootConstant.shadowMapSize.y);
+    float2 uv = threadPos / smSize;
+    
+    float4 output = { 0.0f, 0.0f, 0.0f, 0.0f };
+
+    float2 offset = { 0.0f, 0.0f };
+    float divisor = (RootConstant.horizontalPass) ? smSize.x : smSize.y;
+    uint offsetIndex = (RootConstant.horizontalPass) ? 0 : 1;
+
+    for (int i = 0; i < 5; ++i)
+    {
+        offset[offsetIndex] = gaussFilter[i].x / divisor;
+        // Avoid artifacting at borders by clamping the sample points
+        float2 samplePoint = clamp(uv + offset, 0.000001, 0.9999999);
+        // Sample each of the points in the surrounding area, weighed by the filter
+        output += srcTexture.SampleLevel(miplessSampler, 
+            samplePoint, 0) * gaussFilter[i].y;
+    }
+
+	dstTexture[DTid.xy] = output;
+}
